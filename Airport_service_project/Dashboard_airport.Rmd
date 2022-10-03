@@ -1,0 +1,162 @@
+---
+title: "Airport service quality analysis based on customer reviews"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+    theme: spacelab
+---
+
+```{r setup, include=FALSE}
+#“default”, “cerulean”, “journal”, “flatly”, “darkly”, “readable”, “spacelab”, “united”, “cosmo”, “lumen”, “paper”, “sandstone”, “simplex”, “yeti”
+
+library(flexdashboard)
+library(ggplot2)
+library(readr)
+library(stringr)
+library(dplyr)
+library(R3PO)
+library(RColorBrewer)
+library(ggthemes)
+
+airline = get_hw1_airline_df()
+airport = get_hw1_airport_df()
+seat = get_hw1_seat_df()
+lounge = get_hw1_lounge_df()
+
+airport$type_traveller=as.factor(airport$type_traveller)
+airport$queuing_rating=as.numeric(airport$queuing_rating)
+lounge$author_country=as.factor(lounge$author_country)
+
+
+# загрузка данных, предобработка 
+```
+
+
+Column {data-width=550}
+-----------------------------------------------------------------------
+
+### Evaluating queues by different types of travellers
+
+```{r}
+# самый важный график или таблица
+
+cbPalette <- c( "#d0d1e6", "#a6bddb", "#67a9cf", "#1c9099", "#016c59")
+cbPalette1 <- c("#bfd3e6","#9ebcda","#8c96c6","#8856a7","#810f7c")
+
+airport1 = select(airport, type_traveller, queuing_rating)
+airport1=na.omit(airport1)
+
+data_average = airport1 %>% group_by(type_traveller) %>% summarise(average=mean(queuing_rating))
+data_average$average=as.numeric(data_average$average)
+
+airport3 = airport1 %>% inner_join(data_average, by="type_traveller") 
+airport4=airport3 %>% arrange(type_traveller)
+
+# нужные преобразования, построение графика, если нужен
+
+ggplot()+
+geom_bar(data=airport1, aes(x=type_traveller, fill = factor(queuing_rating)),position = 'fill',  colour = "white", width = 0.8)+
+geom_line(data=data_average, aes(x=type_traveller, y= 0.25*average, group=1),alpha=0.8, size = 1, color="black")+
+scale_y_continuous(sec.axis = sec_axis(~./0.25, name = "Average score"))+
+geom_point(data=data_average, aes(x=type_traveller, y= 0.25*average, group=1),size=1.5)+
+scale_x_discrete(labels=c("Business", "Couple Leisure", "Family Leisure", "Solo Leisure"))+
+xlab("") +
+ylab("Proportions of scores") +
+theme_classic()+
+scale_fill_manual(name="Scores", values=cbPalette)+
+
+theme(axis.text.y = element_text(size = 10, color="black")) +
+theme(axis.text.x = element_text(size = 10, color="black")) +
+theme(axis.title.x = element_text(size = 14, color="black")) +
+theme(axis.title.y=element_text(margin=margin(t=15))) +
+theme(legend.position = "right")+
+theme(legend.title = element_text(size=10))
+
+
+```
+
+Column {data-width=450}
+-----------------------------------------------------------------------
+
+### Average score for queues in the airports
+
+```{r}
+airport1 = select(airport, type_traveller, queuing_rating)
+airport1=na.omit(airport1)
+
+data_average = airport1 %>% group_by(type_traveller) %>% summarise(average=mean(queuing_rating))
+data_average$average=as.numeric(data_average$average)
+
+airport3 = airport1 %>% inner_join(data_average, by="type_traveller") 
+airport4=airport3 %>% arrange(type_traveller)
+
+text = format(mean(data_average$average), digits = 2)
+valueBox(paste0(text), icon="fas fa-hourglass-start")
+
+```
+
+
+### Airports with lower ratings than the lounge zones have
+
+```{r}
+# график или таблица
+
+loungeneed = select(lounge,  title, airport, wifi_connectivity_rating)
+airportneed = select(airport,  airport_name, wifi_connectivity_rating)
+loungeneed$airport=str_to_lower(loungeneed$airport)
+loungeneed$airport=str_replace_all(loungeneed$airport, " ","-")
+loungeneed=na.omit(loungeneed)
+airportneed=na.omit(airportneed)
+
+colnames(loungeneed)<-c("title", "airport_name", "wifi_connectivity_rating")
+airportneed1 = airportneed %>% group_by(airport_name)%>%summarise(average=mean(wifi_connectivity_rating))
+colnames(airportneed1) <- c("airport_name", "wifi_connectivity_rating_airport")
+
+commondata = loungeneed %>% inner_join(airportneed1, by = "airport_name")
+commondata1=commondata %>% filter(wifi_connectivity_rating>wifi_connectivity_rating_airport)
+
+counted=count(commondata1, airport_name)
+#можно убрать дубликаты
+
+loungeneed1 = commondata1 %>% group_by(airport_name)%>%summarise(average=mean(wifi_connectivity_rating))
+colnames(loungeneed1) <- c("airport_name", "wifi_connectivity_rating_lounge")
+
+rea=distinct(commondata1, airport_name, wifi_connectivity_rating_airport)
+ready=rea%>%inner_join(loungeneed1, by="airport_name")
+ready1=ready%>%inner_join(counted, by="airport_name")
+colnames(ready)=c("airport_name", "Wi-fi in airports", "Wi-fi in lounges")
+
+
+cbPalette <- c("#a6bddb", "#02818a")
+df <- reshape2::melt(ready)
+df=arrange(df,airport_name, desc(variable), value)
+
+
+ggplot(df, aes(airport_name, value, fill = variable)) +
+  geom_col( position="identity", width=c(0.8, 0.5)) +
+scale_fill_manual(name="Scores", values=cbPalette)+
+ 
+xlab("") +
+ylab("Average score") +
+theme_classic()+
+
+
+theme(axis.text.y = element_text(size = 10, color="black")) +
+theme(axis.text.x = element_text(size = 10, color="black", angle = 75, hjust = 1)) +
+theme(axis.title.x = element_text(size = 14, color="black")) +
+theme(axis.title.y=element_text(margin=margin(t=15))) +
+theme(legend.position = "bottom")+
+theme(legend.title = element_text(size=10))+
+theme(axis.text.x = element_blank(), axis.ticks.x=element_blank()) 
+
+
+```
+
+### Percentage of lounge zones with hihger rating
+
+```{r}
+
+valueBox("50%", icon ="fas fa-wifi")
+
+```
