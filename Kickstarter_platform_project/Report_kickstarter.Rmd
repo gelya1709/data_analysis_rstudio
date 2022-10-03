@@ -1,0 +1,418 @@
+---
+title: 'HW 2: Analysis of the success of projects launched on the Kickstarter platform'
+author: "Сучкова Ангелина, assuchkova_1"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+## Задача
+
+На основе данных нужно:
+
+* выяснить, какие факторы определяют успешность проекта
+* построить модель, предсказывающую будет ли проект успешен
+
+#### Загрузка данных и преобразование
+
+```{r message = FALSE, warning=FALSE, echo = FALSE}
+library(kableExtra)
+library(coin)
+library(lubridate)
+library(stringr)
+library(skimr)
+library(dplyr) 
+library(readr)
+library(ggplot2)
+library(magrittr)
+library(rpart)
+library(rpart.plot)
+kickstarter = read_csv("~/shared/minor2_2020/1-Intro/hw2/kickstarter.csv")
+usd_goal = read_csv("~/shared/minor2_2020/1-Intro/hw2/usd_goals.csv")
+```
+
+Необходимые данные (большинство) представлены в пригодном для анализа виде. Дальнейшие преобразования сделаны в ходе исследования по мере необходимости.
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+kickstarter=left_join(kickstarter, usd_goal, by="id")
+kickstarter=kickstarter%>%mutate_if(is.character, as.factor)
+kickstarter$deadline=as.Date(kickstarter$deadline)
+kickstarter$launched=as.Date(kickstarter$launched)
+kickstarter$period=difftime(kickstarter$deadline,kickstarter$launched, units = c("days"))
+kickstarter$period=round(kickstarter$period, digits=0)
+kickstarter$usd_goal_real=round(kickstarter$usd_goal_real, digits=0)
+kickstarter = subset(kickstarter, select = -c(goal.x, goal.y,name, currency))
+
+```
+
+<br>
+
+### Шаги
+<br>
+
+#### Шаг 1: Общий анализ и выявления тенденций
+
+<br>
+
+**Вопрос 1:** Какие категории проектов наиболее популярны на Kickstarter? В каких категориях большинство проектов успешны?
+
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+cbPalette <- c("#fdae6b", "#a63603")
+require(forcats)
+ggplot(kickstarter) + geom_bar(aes(x=fct_infreq(main_category), fill=as.factor(state)), width = 0.8, colour = "white")+ 
+
+xlab("") +
+ylab("") +
+ggtitle("Number of projects by categories")+
+theme_minimal()+
+scale_fill_manual(name="State", values=cbPalette)+
+theme(axis.text.y = element_text(size = 10, color="black")) +
+theme(axis.text.x = element_text(size = 10, color="black", angle = 75, hjust = 1))+
+theme(axis.title.x = element_text(size = 14, color="black")) +
+theme(axis.title.y=element_text(margin=margin(t=15))) +
+theme(legend.position = "right")+
+theme(legend.title = element_text(size=10))+
+theme(plot.title = element_text(hjust = 0.5))
+```
+
+
+**Ответ:** Cудя по результатам, **наибольшее количество проектов** на платформе относится к категориям Games, Technology, Film & Video, Design, Publishing and Music (>4000).
+Причем **процентное количество успешных проектов** от общего числа проектов больше в категориях
+Comics, Dance, Theater, Games and Music (процент успешных проектов 49-69%, значит, можно сказать, что более половины успешных проектов - это показатель того, что категория в целом имеет неплохой потенциал)
+
+<br>
+
+**Вопрос 2:** Есть ли выбросы в данных (usd_goal_real), которые могут сильно исказить результаты исследования?
+
+```{r echo = FALSE, message = FALSE, warning = FALSE, results=FALSE}
+cbPalette <- c("#fdae6b", "#a63603")
+
+#Boxplot на исходных данных
+ggplot(data=kickstarter)+geom_boxplot(aes(x=main_category, y=as.numeric(usd_goal_real)), fill="#fdae6b")+
+xlab("") +
+ylab("") +
+ggtitle("Goal in USD") +
+theme_minimal()+
+theme(axis.text.x = element_text(size = 10, color="black", angle = 75, hjust = 1))+
+theme(axis.text.y = element_text(size = 10, color="black")) +
+theme(axis.title.x = element_text(size = 14, color="black")) +
+theme(legend.title = element_text(size=10))+
+theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+
+#Boxpolot на сокращенных данных (quantile=0.95)
+q1=unname(round(quantile(kickstarter$usd_goal_real,probs = (0.00))))
+q2=unname(round(quantile(kickstarter$usd_goal_real,probs = (0.95))))
+data_short=kickstarter%>%filter(usd_goal_real>q1 & usd_goal_real<q2) 
+
+ggplot(data=data_short)+geom_boxplot(aes(x=main_category, y=as.numeric(usd_goal_real)), fill="#fdae6b")+
+xlab("") +
+ylab("") +
+ggtitle("Goal in USD") +
+theme_minimal()+
+theme(axis.text.x = element_text(size = 10, color="black", angle = 75, hjust = 1))+
+theme(axis.text.y = element_text(size = 10, color="black")) +
+theme(axis.title.x = element_text(size = 14, color="black")) +
+theme(legend.title = element_text(size=10))+
+theme(plot.title = element_text(hjust = 0.5))
+```
+
+
+**Ответ:** Как видим, у нас **есть до такой степени "экстремальные" выбросы**, что на исходных данных boxplot не показывает практически никакой информации о данных. После удаления 0.05 процентов верхних значений, график по-прежнему показывает большое количество выбросов, но они уже не так сильно искажают результаты, как удаленные нами выбросы.
+
+<br>
+
+**Вопрос 3:** Насколько отличается среднее значение usd_goal_real по категориям проектов? (будем работать с данными без выбросов)
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+cbPalette <- c("#d94801", "#7f2704")
+average_goal=data_short%>% group_by(main_category, state)%>%summarise(average=mean(usd_goal_real))
+
+ggplot()+
+geom_line(data=average_goal, aes(x=main_category, y= average, group=state, color=factor(state)), size = 1)+
+
+xlab("") +
+ylab("") +
+ggtitle("Average goal in USD by categories") +
+theme_minimal()+
+scale_color_manual(name="State", values=cbPalette)+
+
+theme(axis.text.y = element_text(size = 10, color="black")) +
+theme(axis.text.x = element_text(size = 10, color="black", angle = 75, hjust = 1))+
+theme(axis.title.x = element_text(size = 14, color="black")) +
+theme(axis.title.y=element_text(margin=margin(t=15))) +
+theme(legend.position = "right")+
+theme(legend.title = element_text(size=10))+
+theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+
+**Ответ:** Таким образом, мы видим, что **среднее значение цели ниже для проектов, которые оказались успешными,** из всех категорий. Разница между размером цели для успешных и провальных проекта в среднем составляет 3-5 тыс. долларов. Самые высокие значения цели представлены в категориях Design, Food и Technology.
+
+<br>
+
+**Вопрос 4:**  Если ли наглядная зависимость между размером цели и продолжительностью сбора средств(period)?
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+cbPalette <- c("#fdae6b", "#a63603")
+ggplot(data=data_short) + geom_point(aes(x=period, y=usd_goal_real, colour = factor(state)))+
+xlab("Period") +
+ylab("") +
+ggtitle("The relationship between goal-size and period of collection of funds") +
+theme_minimal()+
+scale_color_manual(name="State", values=cbPalette)+
+
+theme(axis.text.y = element_text(size = 10, color="black")) +
+theme(axis.text.x = element_text(size = 10, color="black"))+
+theme(axis.title.x = element_text(size = 14, color="black")) +
+theme(axis.title.y=element_text(margin=margin(t=15))) +
+theme(legend.position = "right")+
+theme(legend.title = element_text(size=10))+
+theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+
+**Ответ:**По графику видно, что прямой зависимости между данными нет. Можно только препдоложить, что наиболее популярные периоды для сбора средств это **месяц, полтора месяца и два месяца.**
+
+<br>
+
+**Вопрос 5:** На сколько отличается количество спонсоров (backers) для разных категорий проектов?
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+cbPalette <- c("#d94801", "#7f2704")
+average_backers=kickstarter%>% group_by(main_category, state)%>%summarise(average=mean(backers))
+
+ggplot()+
+geom_line(data=average_backers, aes(x=main_category, y= average, group=state, color=factor(state)), size = 1)+
+ggtitle("Average number of backers by categories") +
+xlab("") +
+ylab("") +
+ 
+theme_minimal()+
+scale_color_manual(name="State", values=cbPalette)+
+
+theme(axis.text.y = element_text(size = 10, color="black")) +
+theme(axis.text.x = element_text(size = 10, color="black", angle = 75, hjust = 1))+
+theme(axis.title.x = element_text(size = 14, color="black")) +
+theme(axis.title.y=element_text(margin=margin(t=15))) +
+theme(legend.position = "right")+
+theme(legend.title = element_text(size=10))+
+theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+
+**Ответ:** Наиболее пользующие популярностью среди спонсоров категории - это Design, Games и Technology, для них разница в количестве спонсоров между успешными и провальными проектами очень высокая (350-600). Для остальных категорий **средняя разница примерно 100-200 человек**.
+
+<br>
+
+#### Шаг 2: Построение предсказательной модели и ее оценка
+
+<br>
+
+**1.** Разделим выборку на обучающую и тестовую и попробуем построить дерево, чтобы определить значимые для нас переменные.
+
+```{r echo = FALSE, message = FALSE, warning = FALSE }
+cbPalette <- c("#9ecae1", "#4292c6", "#fdd0a2", "#f16913")
+set.seed(1234)
+kickstarter_train = kickstarter %>% sample_frac(.8)
+kickstarter_test= anti_join(kickstarter, kickstarter_train, by = 'id') %>% select(-id)
+kickstarter_train = kickstarter_train %>% select(-id)
+
+kickstarter$state = as.factor(kickstarter$state)
+set.seed(1234)
+tree1 <- rpart(state ~ backers+usd_goal_real+period, method = "class", data = kickstarter_train, control=rpart.control(cp=0.01))
+rpart.plot::rpart.plot(tree1, type = 1, box.palette = cbPalette)
+```
+
+
+**Видим, что значимые для нашей модели переменные - это backers и usd_goal_real**. На основе дерева можно сформировать правила, следуя которым, можно будет предсказать успешность проекта. 
+<br>
+
+**2.** Проверим точность модели на тренировочной и тестовой выборке.
+<br>
+
+```{r echo = FALSE, message = FALSE, warning = FALSE, results=FALSE}
+pred = predict(tree1, type="class", data =kickstarter_train )
+t = table(pred, kickstarter_train$state)
+a = (t[1,1] + t[2,2])/sum(t)
+
+
+pred_test = predict(tree1, newdata = kickstarter_test, type="class" )
+t = table(pred_test, kickstarter_test$state)
+b = (t[1,1] + t[2,2])/sum(t)
+
+```
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+ac1= data.frame(Indicator = c("Accuracy (train)", "Accuracy (test)"), Value = c(a, b)) 
+kbl(ac1, table.attr = "style='width:50%;'", caption = "**Accuracy values of our model for two samples**") %>%
+kable_classic(full_width=T, html_font = "Cambria",  position = "left")
+
+```
+<br>
+**Точность модели на разных выборках практически одинакова и равна 90 %,**что говорит о высоком качестве модели.
+<br>
+
+**3.**Проверим статистическую значимость полученных результатов.
+<br>
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+options("scipen"=999)
+i_b=independence_test(state ~ backers, data = kickstarter)
+i_g=independence_test(state ~ usd_goal_real, data = kickstarter)
+
+t_b=t.test(backers~state, data = kickstarter)
+t_g=t.test(usd_goal_real~state, data = kickstarter)
+```
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+options("scipen"=999, digits=10)
+tests1= data.frame(Test = c("Independence test", "Student's t-test"), Pvalue.backers = c(pvalue(i_b), pvalue(i_g)), Pvalue.goal = c(t_b$p.value, t_g$p.value) )
+kbl(tests1, table.attr = "style='width:50%;'", caption = '**P-values between used variables and variable \"state\"**' ) %>%
+kable_classic(full_width=T, html_font = "Cambria",  position = "left")
+```
+
+<br>
+**P-value в выполненных статистических тестах меньше 0.05, из чего мы можем сделать вывод, что наши результаты (прогностическая модель и ее точность) не случайны.**
+<br>
+
+
+**4.** Результаты нашей прогностической модели представлены в таблице.
+<br>
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+options("scipen"=999, digits=2)
+
+pred_test1<- rename(data.frame(pred_test),c('pred'='pred_test'))
+gg = rbind(data.frame(pred), data.frame(pred_test1))
+ggg=cbind(kickstarter,gg)
+ggg=ggg%>%select(main_category, pred)
+ggg1=ggg%>%filter(pred=="successful")%>%count(main_category)
+ggg2=ggg%>%filter(pred=="failed")%>%count(main_category)
+joined=left_join(ggg1,ggg2,by="main_category")
+colnames(joined)=c("Category","Success","Failed")
+joined=joined%>%mutate(Percent=Success/(Failed+Success))%>%arrange(-Percent)
+kbl(joined, table.attr = "style='width:50%;'" ) %>%
+kable_classic( full_width=T, position = "left", font_size = 14)%>%
+row_spec(5, bold = F, color = "black", background = "#fee0d2")%>%
+row_spec(7:9, bold = F, color = "black", background = "#fee0d2")%>%
+row_spec(11, bold = F, color = "black", background = "#fee0d2")
+```
+<br>
+
+**Вывод (шаг 2)**: В соотвествии внашей моделью, **самые привлекательные категории для запуски проекта(с точки зрения верочтности успеха) - это Comics, Journalism и Dance.** Причем эти категории не относятся к самым многочисленным. Таким образом, процент успешных проктов составляет менее 50 для всех категорий, что хуже чем в настоящих данных. Категории Comics и Dance также лидеры по числу успешных проектов в реальных данных, что еще раз позволяет указать на высокую точность нашей модели. 
+
+<br>
+
+#### Шаг 3: Еще одна идея
+<br>
+
+Проверим еще одну гипотезу: **влияет ли продолжительность (period) сбора средств на успешность проекта?**
+
+**1.**Для этого, преобразуем наши данные о периодах в категориальный формат(т.к. регрессионная модель оказалась неэффективна) и проверим их статистическую значимость.
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+weeks=kickstarter
+weeks=weeks%>%mutate(code=ifelse(weeks$period>=0 & weeks$period<15, 1, weeks$period))
+weeks$code=ifelse(weeks$period>=15 & weeks$period<30, 2, weeks$code)
+weeks$code=ifelse(weeks$period>=30 & weeks$period<45, 3, weeks$code)
+weeks$code=ifelse(weeks$period>=45 & weeks$period<=61, 4, weeks$code)
+weeks$code=as.factor(weeks$code)
+```
+
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+options("scipen"=-20, digits=15)
+i2=independence_test(state ~ code, data = weeks)
+t2=t.test(period~state, data = weeks)
+ch2 = chisq.test(weeks$state, weeks$code)
+
+tests2= data.frame(Test = c("Independence test", "Student's t-test", "Chi-squared test"), Pvalue = c(pvalue(i2), t2$p.value, ch2$p.value) )
+kbl(tests2, table.attr = "style='width:70%;'", caption = '**P-values between new variable \"code\" and variable \"state\"**' ) %>%
+kable_classic(full_width=T, html_font = "Cambria",  position = "left")
+```
+
+**Мы видим, что наши p-value очень близки к нулю во всех стат. тестах**, значит, можем работать с категориальными переменными дальше. 
+<br>
+
+**2.**Попробуем постоить модель на основе goal и нашей новой переменной code.
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+set.seed(1234)
+weeks_train = weeks %>% sample_frac(.8)
+weeks_test= anti_join(weeks, weeks_train, by = 'id') %>% select(-id)
+weeks_train = weeks_train %>% select(-id)
+
+weeks$state = as.factor(weeks$state)
+set.seed(1234)
+tree1 <- rpart(state ~ usd_goal_real+code, method = "class", data = weeks_train)
+```
+
+```{r echo = FALSE, message = FALSE, warning = FALSE, results=FALSE}
+pred1 = predict(tree1, type="class", data =weeks_train )
+t = table(pred1, weeks_train$state)
+c=(t[1,1] + t[2,2])/sum(t)
+
+pred_test1 = predict(tree1, newdata = weeks_test, type="class" )
+t = table(pred_test1, weeks_test$state)
+d=(t[1,1] + t[2,2])/sum(t)
+```
+
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+options("scipen"=999, digits=2)
+ac2= data.frame(Indicator = c("Accuracy (train)", "Accuracy (test)"), Value = c(c, d)) 
+kbl(ac2, table.attr = "style='width:50%;'", caption = "**Accuracy values of our model for two samples**") %>%
+kable_classic(full_width=T, html_font = "Cambria",  position = "left")
+```
+
+**Точность нашей новой модели составляет примерно 62%,** что не плохо, но меньше, чем в предыдущей.
+
+**Вывод (шаг 3)**: Так, мы видим, что связь между code и state есть, причем она статистически значима. Однако в нашем случае, переменная backers настолько хорошо позволяет предсказать успешность проекта, что при использовании ее вместе с goal другие переменные только снижают качество модели. **Переменная code в сочетании с другими переменными может быть использована в модели, если у нас не будет данных о backers.**
+
+
+### Дэшборд
+
+Полученные выводы обобщены в виде дэшборда со следующими элементами 
+
+**Элемент 1:** 
+ - вид: число 
+ - шаг 2, пункт 1 (дерево) 
+ - обоснование: взято значение критерия backers для успешного проекта 
+ 
+**Элемент 2:** 
+ - вид: число 
+ - шаг 2, пункт 2 (accuracy) 
+ - обоснование: показать высокую точность модели 
+ 
+**Элемент 3:** 
+ - вид: число 
+ - шаг 2, пункт 3 (p-value) 
+ - обоснование: доказать статистическую значимость результатов 
+ 
+**Элемент 4:** 
+ - вид: число 
+ - шаг 1, промежуточные вычисления 
+ - обоснование: определить верхнюю границу goal для успешного проекта 
+ 
+ **Элемент 5:** 
+ - вид: график 
+ - шаг 1, вопрос 5 
+ - обоснование: показать разницу в backers для успешные и провальных проектов, доказать необходимость большого количества спонсоров  
+ 
+ **Элемент 6:** 
+ - вид: число 
+ - шаг 2, пункт 4  
+ - обоснование: показать наглядно результаты прогностической модели  
+ 
+ **Элемент 7:** 
+ - вид: график 
+ - шаг 1, вопрос 3 
+ - обоснование: показать разницу в goal для успешные и провальных проектов, доказать необходимость разумного(более низкого) размера цели 
+ 
+
