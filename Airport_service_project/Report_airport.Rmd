@@ -1,0 +1,280 @@
+---
+title: 'HW 1: Airport service quality analysis based on customer reviews'
+author: "Сучкова Ангелина, assuchkova_1"
+output: html_document
+---
+
+## Задача
+
+На основе данных (и выданных вопросов) постараться выяснить:
+
+* какие проблемы есть в авиаперевозках
+* какие улучшения можно предложить на основе выводов по данным
+
+#### Загрузка данных и преобразование
+
+```{r message = FALSE, warning=FALSE, echo = FALSE}
+library(flexdashboard)
+library(ggplot2)
+library(readr)
+library(stringr)
+library(dplyr)
+library(R3PO)
+library(RColorBrewer)
+library(ggthemes)
+
+airline = get_hw1_airline_df()
+airport = get_hw1_airport_df()
+seat = get_hw1_seat_df()
+lounge = get_hw1_lounge_df()
+
+get_hw1_questions()
+```
+
+Необходимые данные (большинство) представлены в пригодном для анализа виде. Дальнейшие преобразования сделаны в ходе исследования по мере необходимости.
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+# преобразование данных, предобработка
+airport$type_traveller=as.factor(airport$type_traveller)
+airport$queuing_rating=as.numeric(airport$queuing_rating)
+lounge$author_country=as.factor(lounge$author_country)
+```
+
+
+### Вопросы
+
+<br>
+
+#### Вопрос 1
+
+**Вопрос:** Какие типы путешественников (type_traveller) поставили самые высокие оценки по критерию оценок за очереди?
+
+**Данные:** Для ответа на вопрос нужна таблица airport
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+# код для ответа на вопрос 1:
+
+library(RColorBrewer)
+library(ggthemes)
+
+cbPalette <- c( "#d0d1e6", "#a6bddb", "#67a9cf", "#1c9099", "#016c59")
+cbPalette1 <- c("#bfd3e6","#9ebcda","#8c96c6","#8856a7","#810f7c")
+
+airport1 = select(airport, type_traveller, queuing_rating)
+airport1=na.omit(airport1)
+
+data_average = airport1 %>% group_by(type_traveller) %>% summarise(average=mean(queuing_rating))
+data_average$average=as.numeric(data_average$average)
+
+airport3 = airport1 %>% inner_join(data_average, by="type_traveller") 
+airport4=airport3 %>% arrange(type_traveller)
+
+# нужные преобразования, построение графика, если нужен
+
+ggplot()+
+geom_bar(data=airport1, aes(x=type_traveller, fill = factor(queuing_rating)),position = 'fill',  colour = "white", width = 0.8)+
+geom_line(data=data_average, aes(x=type_traveller, y= 0.25*average, group=1),alpha=0.8, size = 1, color="black")+
+scale_y_continuous(sec.axis = sec_axis(~./0.25, name = "Average score"))+
+geom_point(data=data_average, aes(x=type_traveller, y= 0.25*average, group=1),size=1.5)+
+
+xlab("") +
+ylab("Proportions of scores") +
+ggtitle("Evaluating queues in airports by different types of travellers") +
+theme_classic()+
+scale_fill_manual(name="Scores", values=cbPalette)+
+
+theme(axis.text.y = element_text(size = 10, color="black")) +
+theme(axis.text.x = element_text(size = 10, color="black")) +
+theme(axis.title.x = element_text(size = 14, color="black")) +
+theme(axis.title.y=element_text(margin=margin(t=15))) +
+theme(legend.position = "right")+
+theme(legend.title = element_text(size=10))+
+scale_x_discrete(labels=c("Business", "Couple Leisure", "Family Leisure", "Solo Leisure"))
+
+```
+
+**Ответ:** График выше показывает процентное распределение оценок, поставленных разными типами путешественников. Уже по этим данным видно, что путешественники типа Family Leisure имеют наибольшие доли оценок 4 и 5. 
+Однако, для того, чтобы убедиться в правильности выводов, и для того, чтобы определить оценки других типов путешественников, был построен график средней оценки, который подтвердил первоначальный вывод. **Средняя оценка Family Leisure путешественников составляет примерно 3.5, что является самым высоким показателем.**
+
+**Вывод:** На основе полученных данных, можно сделать вывод, что Family Leisure путшественники более терпимо относятся к очереди в аэропорту по сравнению с остальными типами путешественников. Причем средняя оценка Family Leisure все лишь 3.5, что не очень высоко. Самые низкие оценки потставлены Business клиентами; что следует отметить, в их оценках отсутствуют какие-либо промежуточные значения, присутствуют значения только 1 и 5. Все вышеперечисленное подводит к выводу, что **проблемы с длительным ожиданием в очереди действительно есть.** Следует качестсвенно повысить уровень обслуживания в кассах, на регистрации и досмотре, возможно, наладить систему электронной записи для самых популярных терминалов обслуживания. Чтобы подобрать эффективные решения проблемы нужно определить конкретные причины очередей, поэтому цели дальнейших исследований - это оценить качество обслуживания при регистрации на рейс, покупке билета и досмотре. 
+ 
+<br>
+
+#### Вопрос 2
+
+**Вопрос:** Пользователи каких стран чаще употребляют слово \"good\" (но не \"not good\") в отрицательных отзывах на лаунж-зоны? Т.е. находят что-то хорошее, но в целом не рекомендуют.
+
+**Данные:** Для ответа на вопрос нужна таблица lounge
+
+
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+
+lounge1 = select(lounge, author, author_country, content, recommended)
+lounge1=na.omit(lounge1)
+lounge_selected = lounge1 %>% filter(recommended=="0")
+
+lounge_selected = lounge_selected %>% mutate(goods = str_count(str_to_lower(lounge_selected$content), "good"))
+lounge_selected = lounge_selected %>% mutate(notgoods = str_count(str_to_lower(lounge_selected$content), "not good|n't good"))
+lounge_selected = lounge_selected %>% mutate(net_goods=goods-notgoods)
+lounge_selected=lounge_selected %>% group_by(author_country) %>% summarise(summa=sum(net_goods))
+
+library(forcats)
+
+graph1=lounge_selected %>%
+mutate(author_country = fct_reorder(author_country, summa))%>%
+ggplot() +
+geom_line(aes(x=author_country, y=summa, group=1), stat="identity",  width=1.1)+
+xlab("") +
+ylab("Number of words \"good\"") +
+ggtitle("Positive comments in negative reviews of travellers") +
+theme_classic()+
+
+theme(axis.text.y = element_text(size = 10, color="black")) +
+theme(axis.text.x = element_text(size = 10, color="black")) +
+theme(axis.title.x = element_text(size = 14, color="black")) +
+theme(axis.title.y=element_text(margin=margin(t=15))) +
+
+annotate("rect", xmin = c(16.5, 0, 0), xmax = c(Inf, -Inf, 16.5),
+       ymin = -Inf, ymax = Inf,
+       alpha = 0.8, fill = c(NA, NA, "#f6eff7"))+ 
+annotate("rect", xmin = c(28.5, 16.5, 16.5), xmax = c(Inf, -Inf, 28.5),
+       ymin = -Inf, ymax = Inf,
+       alpha = 0.8, fill = c(NA, NA, "#bdc9e1")) +
+annotate("rect", xmin = c(31.5, 28.5, 28.5), xmax = c(Inf, -Inf, 31.5),
+       ymin = -Inf, ymax = Inf,
+       alpha = 0.8, fill = c(NA, NA, "#67a9cf"))+
+annotate("rect", xmin = c(32.5, 31.5, 31.5), xmax = c(Inf, -Inf, 32.5),
+       ymin = -Inf, ymax = Inf,
+       alpha = 0.8, fill = c(NA, NA, "#02818a"))+
+annotate("rect", xmin = c(34.7, 32.5, 32.5), xmax = c(Inf, -Inf, 34.7),
+       ymin = -Inf, ymax = Inf,
+       alpha = 0.9, fill = c(NA, NA, "#016450"))+
+theme(axis.text.x = element_text(angle = 75, hjust = 1))+
+geom_line(aes(x=author_country, y=summa, group=1), stat="identity",  width=1.1)
+
+graph1
+```
+
+
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+#дополнительные исследования
+
+countss=lounge1 %>% filter(recommended=="0")%>% count(author_country)
+countss1=lounge1 %>% filter(recommended=="1")%>% count(author_country)
+```
+
+
+**Ответ:** **Чаще всего слово good встречается в отрицательных отзывах клиентов из Австралии и Великобритании**, значения для этих стран соответственно равны 18 и 23. Значения для остальных стран значительно ниже, в диапазоне от 0 до 5.
+
+**Вывод:** Более глубокое исследование показало, что полученные результаты обосновываются тем фактом, что количество отзывов от путешественников из Великобритании и Австралии значительно больше чем клиентов из других стран. Великобритания и Австралия лидируют по количеству как положительных, так и отрицательных отзывов. По этой причине, **полученные результаты абсолютно логичны и предсказуемы, они не дают нам дополнительной информации о lounge зонах и качеству сервиса в них.** Мы можем только предположить, что путешественники из этих двух стран а) чаще оставляют отзывы, б) чаще пользуются lounge зонами. Дальнейшие исследования должны основываться на расширенном наборе данных, либо есть смысл поставить другой исследовательский вопрос.
+
+<br>
+
+#### Вопрос 3
+
+**Вопрос:** Какие лаунж-зоны оценены по качеству wi-fi выше, чем аэропорты, в которых они расположены?
+
+**Данные:** Для ответа на вопрос нужны таблицы airport, lounge
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+# код для ответа на вопрос 3:
+
+loungeneed = select(lounge,  title, airport, wifi_connectivity_rating)
+airportneed = select(airport,  airport_name, wifi_connectivity_rating)
+loungeneed$airport=str_to_lower(loungeneed$airport)
+loungeneed$airport=str_replace_all(loungeneed$airport, " ","-")
+loungeneed=na.omit(loungeneed)
+airportneed=na.omit(airportneed)
+
+colnames(loungeneed)<-c("title", "airport_name", "wifi_connectivity_rating")
+airportneed1 = airportneed %>% group_by(airport_name)%>%summarise(average=mean(wifi_connectivity_rating))
+colnames(airportneed1) <- c("airport_name", "wifi_connectivity_rating_airport")
+
+commondata = loungeneed %>% inner_join(airportneed1, by = "airport_name")
+commondata1=commondata %>% filter(wifi_connectivity_rating>wifi_connectivity_rating_airport)
+
+counted=count(commondata1, airport_name)
+#можно убрать дубликаты
+
+loungeneed1 = commondata1 %>% group_by(airport_name)%>%summarise(average=mean(wifi_connectivity_rating))
+colnames(loungeneed1) <- c("airport_name", "wifi_connectivity_rating_lounge")
+
+rea=distinct(commondata1, airport_name, wifi_connectivity_rating_airport)
+ready=rea%>%inner_join(loungeneed1, by="airport_name")
+ready1=ready%>%inner_join(counted, by="airport_name")
+colnames(ready)=c("airport_name", "Wi-fi in airports", "Wi-fi in lounges")
+
+
+cbPalette <- c("#a6bddb", "#02818a")
+df <- reshape2::melt(ready)
+df=arrange(df,airport_name, desc(variable), value)
+
+
+ggplot(df, aes(airport_name, value, fill = variable)) +
+  geom_col( position="identity", width=c(0.8, 0.5)) +
+scale_fill_manual(name="Scores", values=cbPalette)+
+ 
+xlab("") +
+ylab("Average score") +
+ggtitle("Airports with lower ratings than the lounge zones have") +
+theme_classic()+
+
+
+theme(axis.text.y = element_text(size = 10, color="black")) +
+theme(axis.text.x = element_text(size = 10, color="black", angle = 75, hjust = 1)) +
+theme(axis.title.x = element_text(size = 14, color="black")) +
+theme(axis.title.y=element_text(margin=margin(t=15))) +
+theme(legend.position = "right")+
+theme(legend.title = element_text(size=10))+
+scale_x_discrete(labels=c("Aberdeen Airport", "Bangkok Suvarnabhumi Airport", "Frankfurt Main Airport", "Istanbul Ataturk Airport","Klia Kuala Lumpur Airport", "Mexico City Airport", "Miami Airport", "Munich Airport","Seattle Airport", "Vancouver Airport"))
+
+  
+
+
+```
+
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+tabl=commondata1%>%select(title, wifi_connectivity_rating, wifi_connectivity_rating_airport)
+tabl1=distinct(tabl,title, wifi_connectivity_rating, wifi_connectivity_rating_airport )
+colnames(tabl1)=c("Lounge zone", "Wi-fi in lounges", "Wi-fi in airports")
+knitr::kable(tabl1)
+```
+
+
+**Ответ:** Полный список lounge зон, у которых рейтинг wi-fi выше чем у аэропортов, можно увидеть в таблице. **Всего 46 таких lounge зон, они расположены в 8 аэропортах.** Причем разница между средними оценками wi-fi в этих аэропортах и lounge зонах значительна. На графике видно, что оценки lounge зон выше в два раза.
+
+**Вывод:** Дополнительный анализ показал, что **примерно половина всех lounge зон имеет рейтинг выше, чем аэропорты, в которых они расположены.** На основе этих данных можно предположить, что **как минимум в половине аэропортов много мест, где качество wi-fi неудовлетворительное.** Можно подробнее изучить, в каких именно местах в аэропорту клиенты недовольны скоростью wi-fi. После этого предпринять меры по улучшению качества связи. На данный момент можно заняться улучшением wi-fi соединения в lounge зонах, рейтинг которых ниже чем рейтинг аэропортов, в которых они расположены. 
+
+
+### Дэшборд
+
+Полученные выводы обобщены в виде дэшборда со следующими элементами 
+
+**Элемент 1:** 
+ - вид: график
+ - ответ на вопрос: 1
+ - обоснование: отражает доли оценок за очереди, визуально понятно распределение
+ 
+**Элемент 2:** 
+ - вид: числа
+ - ответ на вопрос: 1
+ - обоснование: выделена средняя оценка за очереди, чтобы подчеркнуть, что общая средняя оценка довольно низкая
+ 
+**Элемент 3:** 
+ - вид: график
+ - ответ на вопрос: 3
+ - обоснование: хорошо отражает различия оценок за wi-fi для lounge зон и для аэропортов
+ 
+**Элемент 4:** 
+ - вид: числа
+ - ответ на вопрос: 3
+ - обоснование: показывает долю lounge зон с рейтингом wi-fi выше чем у аэропортов, важно для общей оценки качества wi-fi соединения 
+ 
+
+
+### Общие выводы
+
+В целом анализ качества обслуживания в аэропортах, выполненный на основе исходных данных, показал, что путешественники не очень высоко оценивают качество услуг, оказываемых службами аэропортов.
